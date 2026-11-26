@@ -8,43 +8,45 @@ import urllib.error
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@proxy_caspian")
 
-def fetch_fresh_proxy_from_channel(channel_url):
-    """برداشتن جدیدترین و داغ‌ترین پروکسی از کانال معتبر"""
+def fetch_proxies_from_source(url):
+    proxies = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
-        req = urllib.request.Request(channel_url, headers=headers)
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
-            # پیدا کردن تمام پروکسی‌های معتبر
             matches = re.findall(r'href="(https://t\.me/proxy\?[^"]+)"', html)
-            
-            # جستجو از جدیدترین پیام‌ها به عقب برای پروکسی Fake TLS
             for m in reversed(matches):
                 clean_url = m.replace("&amp;", "&")
+                # فیلتر پروکسی‌های ضدفیلتر و Fake TLS واقعی
                 if "secret=ee" in clean_url or "secret=7" in clean_url:
-                    return clean_url
-            # اگر با سکرت ee پیدا نشد آخرین پروکسی منتشر شده را بدهد
-            if matches:
-                return matches[-1].replace("&amp;", "&")
+                    proxies.append(clean_url)
     except Exception as e:
-        print(f"Error fetching from {channel_url}: {e}")
-    return None
+        print(f"Error fetching from {url}: {e}")
+    return proxies
 
-def get_top_proxies():
-    # فعال‌ترین کانال‌های پروکسی زنده و پرسرعت برای ایران
+def get_4_top_proxies():
+    # ۶ منبع قدرتمند و فعال برای نت ایران
     sources = [
         "https://t.me/s/FalconProxy",
         "https://t.me/s/ProxyMTProto_Tel",
-        "https://t.me/s/ProxyDaemi"
+        "https://t.me/s/TelMTProto",
+        "https://t.me/s/ProxyDaemi",
+        "https://t.me/s/iMTProto",
+        "https://t.me/s/MTP_roxy"
     ]
     
-    selected_proxies = []
+    collected_proxies = []
     for src in sources:
-        p = fetch_fresh_proxy_from_channel(src)
-        if p and p not in selected_proxies:
-            selected_proxies.append(p)
+        proxies = fetch_proxies_from_source(src)
+        if proxies:
+            latest = proxies[0]
+            if latest not in collected_proxies:
+                collected_proxies.append(latest)
+        if len(collected_proxies) == 4:
+            break
             
-    return selected_proxies
+    return collected_proxies
 
 def send_to_channel(proxy_list):
     parsed = urllib.parse.urlparse(proxy_list[0])
@@ -54,7 +56,7 @@ def send_to_channel(proxy_list):
 
     caption = (
         "⚡️ <b>پروکسی کاسپین | PROXY</b>\n\n"
-        "🚀 <b>پروکسی پرسرعت و ضدفیلتر Caspian</b>\n"
+        "⚡️ <b>پروکسی پرسرعت و ضدفیلتر Caspian</b>\n"
         f"📡 سرور: <code>{server}</code>\n"
         f"🔌 پورت: <code>{port}</code>\n"
         "📶 مخصوص: همراه اول، ایرانسل و رایتل ⚡️\n\n"
@@ -62,15 +64,22 @@ def send_to_channel(proxy_list):
         "🆔 @proxy_caspian"
     )
 
-    buttons = []
-    numbers = ["۱", "۲", "۳"]
-    for i, p_url in enumerate(proxy_list):
-        num = numbers[i] if i < len(numbers) else str(i+1)
-        buttons.append([{"text": f"⚡️ اتصال به پروکسی {num} (Connect {i+1}) ⚡️", "url": p_url}])
+    # چیدمان دکمه‌ها به صورت ۲ در ۲ (دوتایی کنار هم)
+    keyboard_layout = [
+        [
+            {"text": "⚡️ Connect 1 ⚡️", "url": proxy_list[0]},
+            {"text": "⚡️ Connect 2 ⚡️", "url": proxy_list[1] if len(proxy_list) > 1 else proxy_list[0]}
+        ],
+        [
+            {"text": "⚡️ Connect 3 ⚡️", "url": proxy_list[2] if len(proxy_list) > 2 else proxy_list[0]},
+            {"text": "⚡️ Connect 4 ⚡️", "url": proxy_list[3] if len(proxy_list) > 3 else proxy_list[0]}
+        ],
+        [
+            {"text": "⚡️ عضویت در کانال کاسپین ⚡️", "url": "https://t.me/proxy_caspian"}
+        ]
+    ]
 
-    buttons.append([{"text": "🚀 عضویت در کانال کاسپین 🚀", "url": "https://t.me/proxy_caspian"}])
-
-    keyboard = {"inline_keyboard": buttons}
+    keyboard = {"inline_keyboard": keyboard_layout}
 
     api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -85,7 +94,7 @@ def send_to_channel(proxy_list):
     req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            print("Successfully sent 3 fresh proxies!")
+            print("Successfully sent 4 proxies in 2x2 layout!")
     except urllib.error.HTTPError as e:
         print(f"Failed to send: {e.code} - {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
@@ -96,8 +105,8 @@ if __name__ == "__main__":
         print("Error: BOT_TOKEN is empty!")
         exit(1)
     
-    fresh_proxies = get_top_proxies()
-    if fresh_proxies:
-        send_to_channel(fresh_proxies)
+    top_proxies = get_4_top_proxies()
+    if top_proxies:
+        send_to_channel(top_proxies)
     else:
-        print("No fresh proxies found.")
+        print("No proxies found.")
