@@ -2,7 +2,8 @@ name: Caspian Proxy Auto Post
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # هر ۱ ساعت یکبار خودکار اجرا می‌شود
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
