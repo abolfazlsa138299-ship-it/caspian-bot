@@ -1,81 +1,126 @@
 import os
 import re
 import json
+import socket
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
-from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@proxy_caspian")
 
-def fetch_proxies(url):
-    """استخراج تمام پروکسی‌های یک کانال"""
+def fetch_proxies_from_url(url):
+    """دریافت لینک‌های خام پروکسی از کانال"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     proxies = []
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
             matches = re.findall(r'href="(https://t\.me/proxy\?[^"]+)"', html)
-            for m in matches:
+            for m in reversed(matches):
                 clean_url = m.replace("&amp;", "&")
                 if clean_url not in proxies:
                     proxies.append(clean_url)
     except Exception as e:
-        print(f"Error fetching from {url}: {e}")
+        print(f"Error reading {url}: {e}")
     return proxies
 
-def get_scheduled_proxies():
-    # محاسبه ساعت فعلی به وقت رسمی ایران
-    iran_tz = timezone(timedelta(hours=3, minutes=30))
-    now_iran = datetime.now(iran_tz)
-    hour = now_iran.hour
+def check_single_proxy(proxy_url):
+    """تست پینگ و برقراری ارتباط واقعی با سرور پروکسی"""
+    parsed = urllib.parse.urlparse(proxy_url)
+    params = urllib.parse.parse_qs(parsed.query)
+    server = params.get("server", [None])[0]
+    port = params.get("port", [None])[0]
+    secret = params.get("secret", [""])[0]
 
-    # تعیین نوبت وعده (۰ تا ۳)
-    if 5 <= hour < 10:
-        slot = 0    # صبح (ساعت ۸)
-    elif 10 <= hour < 15:
-        slot = 1    # ظهر (ساعت ۱۲)
-    elif 15 <= hour < 20:
-        slot = 2    # عصر (ساعت ۱۸:۳۰)
-    else:
-        slot = 3    # شب (ساعت ۲۲:۳۰)
+    if not server or not port:
+        return None
 
-    print(f"Current Iran Hour: {hour} | Active Slot: {slot + 1}")
+    try:
+        port_num = int(port)
+        start_time = time.time()
+        
+        # تست اتصال سوکت با مهلت پاسخ ۱.۵ ثانیه
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1.5)
+        result = sock.connect_ex((server, port_num))
+        sock.close()
 
-    # اولویت اول: کانال VIP اختصاصی
-    vip_proxies = fetch_proxies("https://t.me/s/P1000Y")
+        if result == 0:
+            ping_ms = int((time.time() - start_time) * 1000)
+            is_faketls = secret.startswith("ee")
+            return {
+                "url": proxy_url,
+                "server": server,
+                "port": port,
+                "ping": ping_ms,
+                "is_faketls": is_faketls
+            }
+    except:
+        pass
+    return None
+
+def test_and_filter_proxies(proxy_urls):
+    """تست همزمان تمام پروکسی‌ها در چند ثانیه و رتبه‌بندی آنها"""
+    working_proxies = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(check_single_proxy, proxy_urls)
+        for r in results:
+            if r is not None:
+                working_proxies.append(r)
+
+    # مرتب‌سازی: اول پروکسی‌های Fake TLS و سپس کمترین پینگ (بالاترین سرعت)
+    working_proxies.sort(key=lambda x: (not x["is_faketls"], x["ping"]))
+    return working_proxies
+
+def get_the_best_4_proxies():
+    print("--- شروع تحلیل هوشمند و تست پروکسی‌ها ---")
     
-    # اگر کانال VIP حداقل ۴ پروکسی داشت، نوبت‌بندی انجام می‌شود
-    if len(vip_proxies) >= 4:
-        print(f"Loaded {len(vip_proxies)} proxies from VIP source (@P1000Y)")
-        start_idx = (slot * 4) % len(vip_proxies)
-        selected = []
-        for i in range(4):
-            idx = (start_idx + i) % len(vip_proxies)
-            selected.append(vip_proxies[idx])
-        return selected
+    # مرحله ۱: دریافت و تست پروکسی‌های کانال اصلی (VIP)
+    vip_raw = fetch_proxies_from_url("https://t.me/s/P1000Y")
+    print(f"تعداد پروکسی‌های خام دریافتی از VIP: {len(vip_raw)}")
+    
+    vip_alive = test_and_filter_proxies(vip_raw)
+    print(f"تعداد پروکسی‌های ۱۰۰٪ سالم و پرسرعت VIP: {len(vip_alive)}")
 
-    # اولویت دوم (زاپاس خودکار): در صورت نبود پروکسی جدید در VIP
-    print("VIP source empty or insufficient. Switching to Backup source (@TelMTProto)...")
-    backup_proxies = fetch_proxies("https://t.me/s/TelMTProto")
-    if backup_proxies:
-        return backup_proxies[-4:]
+    selected = []
+    
+    # اضافه کردن بهترین پروکسی‌های سالم VIP
+    for p in vip_alive:
+        selected.append(p)
+        if len(selected) == 4:
+            break
 
-    return []
+    # مرحله ۲: اگر سالم‌های VIP کمتر از ۴ تا بود (یا غایب بود)، جایگزینی آنی از زاپاس
+    needed = 4 - len(selected)
+    if needed > 0:
+        print(f"کمبود {needed} پروکسی! سوئیچ خودکار به زاپاس (@TelMTProto)...")
+        backup_raw = fetch_proxies_from_url("https://t.me/s/TelMTProto")
+        backup_alive = test_and_filter_proxies(backup_raw)
+        print(f"پروکسی‌های سالم پیدا شده در زاپاس: {len(backup_alive)}")
 
-def send_to_channel(proxy_list):
-    if not proxy_list:
-        print("No proxies available to send.")
+        for p in backup_alive:
+            # جلوگیری از پروکسی تکراری
+            if not any(x["url"] == p["url"] for x in selected):
+                selected.append(p)
+                if len(selected) == 4:
+                    break
+
+    return selected
+
+def send_to_channel(proxy_data_list):
+    if not proxy_data_list:
+        print("هیچ پروکسی سالمی در این لحظه یافت نشد.")
         return
 
-    parsed = urllib.parse.urlparse(proxy_list[0])
-    params = urllib.parse.parse_qs(parsed.query)
-    server = params.get("server", ["Caspian-Core"])[0]
-    port = params.get("port", ["443"])[0]
+    # مشخصات سرور اولین پروکسی منتخب
+    server = proxy_data_list[0]["server"]
+    port = proxy_data_list[0]["port"]
 
     caption = (
         "⚡️ <b>پروکسی کاسپین | PROXY</b>\n\n"
@@ -87,10 +132,10 @@ def send_to_channel(proxy_list):
         "🆔 @proxy_caspian"
     )
 
-    p1 = proxy_list[0]
-    p2 = proxy_list[1] if len(proxy_list) > 1 else p1
-    p3 = proxy_list[2] if len(proxy_list) > 2 else p1
-    p4 = proxy_list[3] if len(proxy_list) > 3 else p2
+    p1 = proxy_data_list[0]["url"]
+    p2 = proxy_data_list[1]["url"] if len(proxy_data_list) > 1 else p1
+    p3 = proxy_data_list[2]["url"] if len(proxy_data_list) > 2 else p1
+    p4 = proxy_data_list[3]["url"] if len(proxy_data_list) > 3 else p2
 
     keyboard_layout = [
         [
@@ -120,7 +165,7 @@ def send_to_channel(proxy_list):
     
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            print("Successfully posted 4 scheduled proxies to channel!")
+            print("۴ پروکسی تست‌شده و کاملاً سالم با موفقیت به کانال ارسال شدند!")
     except urllib.error.HTTPError as e:
         print(f"Failed to send: {e.code} - {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
@@ -131,8 +176,8 @@ if __name__ == "__main__":
         print("BOT_TOKEN is empty!")
         exit(1)
     
-    proxies = get_scheduled_proxies()
-    if proxies:
-        send_to_channel(proxies)
+    best_proxies = get_the_best_4_proxies()
+    if best_proxies:
+        send_to_channel(best_proxies)
     else:
-        print("Failed to retrieve proxies from both primary and backup sources.")
+        print("خطا: هیچ پروکسی سالمی تایید نشد.")
