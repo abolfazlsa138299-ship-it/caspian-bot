@@ -4,36 +4,72 @@ import json
 import urllib.request
 import urllib.parse
 import urllib.error
+from datetime import datetime, timezone, timedelta
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@proxy_caspian")
 
-def get_proxies_from_telmtproto():
-    url = "https://t.me/s/TelMTProto"
+def fetch_proxies(url):
+    """استخراج تمام پروکسی‌های یک کانال"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    collected = []
+    proxies = []
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=12) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
             matches = re.findall(r'href="(https://t\.me/proxy\?[^"]+)"', html)
-            
-            for m in reversed(matches):
+            for m in matches:
                 clean_url = m.replace("&amp;", "&")
-                if clean_url not in collected:
-                    collected.append(clean_url)
-                if len(collected) == 4:
-                    break
+                if clean_url not in proxies:
+                    proxies.append(clean_url)
     except Exception as e:
         print(f"Error fetching from {url}: {e}")
-        
-    return collected
+    return proxies
+
+def get_scheduled_proxies():
+    # محاسبه ساعت فعلی به وقت رسمی ایران
+    iran_tz = timezone(timedelta(hours=3, minutes=30))
+    now_iran = datetime.now(iran_tz)
+    hour = now_iran.hour
+
+    # تعیین نوبت وعده (۰ تا ۳)
+    if 5 <= hour < 10:
+        slot = 0    # صبح (ساعت ۸)
+    elif 10 <= hour < 15:
+        slot = 1    # ظهر (ساعت ۱۲)
+    elif 15 <= hour < 20:
+        slot = 2    # عصر (ساعت ۱۸:۳۰)
+    else:
+        slot = 3    # شب (ساعت ۲۲:۳۰)
+
+    print(f"Current Iran Hour: {hour} | Active Slot: {slot + 1}")
+
+    # اولویت اول: کانال VIP اختصاصی
+    vip_proxies = fetch_proxies("https://t.me/s/P1000Y")
+    
+    # اگر کانال VIP حداقل ۴ پروکسی داشت، نوبت‌بندی انجام می‌شود
+    if len(vip_proxies) >= 4:
+        print(f"Loaded {len(vip_proxies)} proxies from VIP source (@P1000Y)")
+        start_idx = (slot * 4) % len(vip_proxies)
+        selected = []
+        for i in range(4):
+            idx = (start_idx + i) % len(vip_proxies)
+            selected.append(vip_proxies[idx])
+        return selected
+
+    # اولویت دوم (زاپاس خودکار): در صورت نبود پروکسی جدید در VIP
+    print("VIP source empty or insufficient. Switching to Backup source (@TelMTProto)...")
+    backup_proxies = fetch_proxies("https://t.me/s/TelMTProto")
+    if backup_proxies:
+        return backup_proxies[-4:]
+
+    return []
 
 def send_to_channel(proxy_list):
     if not proxy_list:
-        print("No proxies found to send.")
+        print("No proxies available to send.")
         return
 
     parsed = urllib.parse.urlparse(proxy_list[0])
@@ -56,7 +92,6 @@ def send_to_channel(proxy_list):
     p3 = proxy_list[2] if len(proxy_list) > 2 else p1
     p4 = proxy_list[3] if len(proxy_list) > 3 else p2
 
-    # دکمه‌های مینیمال، سنگین و بدون رعدوبرق
     keyboard_layout = [
         [
             {"text": "Connect 1", "url": p1},
@@ -85,7 +120,7 @@ def send_to_channel(proxy_list):
     
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            print("Successfully sent clean proxies to Caspian channel!")
+            print("Successfully posted 4 scheduled proxies to channel!")
     except urllib.error.HTTPError as e:
         print(f"Failed to send: {e.code} - {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
@@ -96,8 +131,8 @@ if __name__ == "__main__":
         print("BOT_TOKEN is empty!")
         exit(1)
     
-    proxies = get_proxies_from_telmtproto()
+    proxies = get_scheduled_proxies()
     if proxies:
         send_to_channel(proxies)
     else:
-        print("No proxies retrieved.")
+        print("Failed to retrieve proxies from both primary and backup sources.")
