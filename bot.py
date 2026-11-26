@@ -1,8 +1,6 @@
-
 import os
 import re
 import json
-import socket
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -10,65 +8,43 @@ import urllib.error
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@proxy_caspian")
 
-def check_proxy_alive(server, port, timeout=1.8):
-    """تست واقعی اتصال و پینگ سرور در کسری از ثانیه"""
+def fetch_fresh_proxy_from_channel(channel_url):
+    """برداشتن جدیدترین و داغ‌ترین پروکسی از کانال معتبر"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((server, int(port)))
-        sock.close()
-        return result == 0  # 0 یعنی سرور فعال و پینگ عالی است
-    except:
-        return False
+        req = urllib.request.Request(channel_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            # پیدا کردن تمام پروکسی‌های معتبر
+            matches = re.findall(r'href="(https://t\.me/proxy\?[^"]+)"', html)
+            
+            # جستجو از جدیدترین پیام‌ها به عقب برای پروکسی Fake TLS
+            for m in reversed(matches):
+                clean_url = m.replace("&amp;", "&")
+                if "secret=ee" in clean_url or "secret=7" in clean_url:
+                    return clean_url
+            # اگر با سکرت ee پیدا نشد آخرین پروکسی منتشر شده را بدهد
+            if matches:
+                return matches[-1].replace("&amp;", "&")
+    except Exception as e:
+        print(f"Error fetching from {channel_url}: {e}")
+    return None
 
-def get_live_highspeed_proxies():
+def get_top_proxies():
+    # فعال‌ترین کانال‌های پروکسی زنده و پرسرعت برای ایران
     sources = [
         "https://t.me/s/FalconProxy",
         "https://t.me/s/ProxyMTProto_Tel",
-        "https://t.me/s/ProxyDaemi",
-        "https://t.me/s/iMTProto",
-        "https://t.me/s/IRN_VPN"
+        "https://t.me/s/ProxyDaemi"
     ]
-    raw_proxies = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-    for url in sources:
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-                matches = re.findall(r'href="(https://t\.me/proxy\?[^"]+)"', html)
-                for m in matches:
-                    clean_url = m.replace("&amp;", "&")
-                    # حتما فیک‌تی‌ال‌اس باشد
-                    if "secret=ee" in clean_url and clean_url not in raw_proxies:
-                        raw_proxies.append(clean_url)
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
-
-    # برعکس کردن لیست برای تست از جدیدترین به قدیمی‌ترین
-    raw_proxies.reverse()
-
-    verified_proxies = []
-    print("Testing proxies latency and availability...")
-
-    for p in raw_proxies:
-        parsed = urllib.parse.urlparse(p)
-        params = urllib.parse.parse_qs(parsed.query)
-        server = params.get("server", [None])[0]
-        port = params.get("port", [None])[0]
-
-        if server and port:
-            # ربات خودش پورت و سرور را تست پینگ می‌کند
-            if check_proxy_alive(server, port):
-                print(f"✅ Verified Alive: {server}:{port}")
-                verified_proxies.append(p)
-                if len(verified_proxies) == 3:
-                    break
-            else:
-                print(f"❌ Dead/Slow Proxy skipped: {server}:{port}")
-
-    return verified_proxies
+    
+    selected_proxies = []
+    for src in sources:
+        p = fetch_fresh_proxy_from_channel(src)
+        if p and p not in selected_proxies:
+            selected_proxies.append(p)
+            
+    return selected_proxies
 
 def send_to_channel(proxy_list):
     parsed = urllib.parse.urlparse(proxy_list[0])
@@ -109,7 +85,7 @@ def send_to_channel(proxy_list):
     req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            print("Successfully sent 3 tested live proxies!")
+            print("Successfully sent 3 fresh proxies!")
     except urllib.error.HTTPError as e:
         print(f"Failed to send: {e.code} - {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
@@ -120,8 +96,8 @@ if __name__ == "__main__":
         print("Error: BOT_TOKEN is empty!")
         exit(1)
     
-    live_proxies = get_live_highspeed_proxies()
-    if live_proxies:
-        send_to_channel(live_proxies)
+    fresh_proxies = get_top_proxies()
+    if fresh_proxies:
+        send_to_channel(fresh_proxies)
     else:
-        print("No alive fast proxies found in this cycle.")
+        print("No fresh proxies found.")
