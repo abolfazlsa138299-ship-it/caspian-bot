@@ -4,8 +4,9 @@ import json
 import random
 import urllib.request
 import urllib.parse
+import urllib.error
 
-# دریافت اطلاعات از متغیرهای امن
+# دریافت اطلاعات
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@proxy_caspian")
 
@@ -38,10 +39,10 @@ def send_to_channel(proxy_url):
     emoji = random.choice(emojis)
 
     caption = (
-        f"🌊 **پروکسی کاسپین | Caspian Proxy**\n\n"
-        f"{emoji} **پروکسی پرسرعت و ضدفیلتر MTProto**\n"
-        f"📡 سرور: `{server}`\n"
-        f"🔌 پورت: `{port}`\n"
+        f"🌊 <b>پروکسی کاسپین | Caspian Proxy</b>\n\n"
+        f"{emoji} <b>پروکسی پرسرعت و ضدفیلتر MTProto</b>\n"
+        f"📡 سرور: <code>{server}</code>\n"
+        f"🔌 پورت: <code>{port}</code>\n"
         f"📶 مخصوص: همراه اول، ایرانسل و رایتل ⚡️\n\n"
         f"🤍 با فوروارد کردن از ما حمایت کنید\n"
         f"🆔 @proxy_caspian"
@@ -58,18 +59,21 @@ def send_to_channel(proxy_url):
     payload = {
         "chat_id": CHANNEL_ID,
         "text": caption,
-        "parse_mode": "Markdown",
-        "reply_markup": json.dumps(keyboard),
+        "parse_mode": "HTML",
+        "reply_markup": keyboard,
         "disable_web_page_preview": True
     }
 
-    data = urllib.parse.urlencode(payload).encode("utf-8")
-    req = urllib.request.Request(api_url, data=data)
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
             print("Successfully sent to channel!")
+    except urllib.error.HTTPError as e:
+        error_msg = e.read().decode("utf-8", errors="ignore")
+        print(f"Failed to send: {e.code} - {error_msg}")
     except Exception as e:
-        print("Failed to send:", e)
+        print(f"Failed to send: {e}")
 
 if __name__ == "__main__":
     if not BOT_TOKEN:
