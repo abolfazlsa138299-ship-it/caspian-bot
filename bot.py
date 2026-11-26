@@ -1,6 +1,8 @@
+
 import os
 import re
 import json
+import socket
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -8,13 +10,24 @@ import urllib.error
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@proxy_caspian")
 
-def get_high_speed_proxies():
-    # منابع معتبر که پروکسی با پهنای باند واقعی برای ایران می‌گذارند
+def check_proxy_alive(server, port, timeout=1.8):
+    """تست واقعی اتصال و پینگ سرور در کسری از ثانیه"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((server, int(port)))
+        sock.close()
+        return result == 0  # 0 یعنی سرور فعال و پینگ عالی است
+    except:
+        return False
+
+def get_live_highspeed_proxies():
     sources = [
         "https://t.me/s/FalconProxy",
         "https://t.me/s/ProxyMTProto_Tel",
-        "https://t.me/s/TelMTProto",
-        "https://t.me/s/iMTProto"
+        "https://t.me/s/ProxyDaemi",
+        "https://t.me/s/iMTProto",
+        "https://t.me/s/IRN_VPN"
     ]
     raw_proxies = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -27,27 +40,35 @@ def get_high_speed_proxies():
                 matches = re.findall(r'href="(https://t\.me/proxy\?[^"]+)"', html)
                 for m in matches:
                     clean_url = m.replace("&amp;", "&")
-                    if clean_url not in raw_proxies:
+                    # حتما فیک‌تی‌ال‌اس باشد
+                    if "secret=ee" in clean_url and clean_url not in raw_proxies:
                         raw_proxies.append(clean_url)
         except Exception as e:
-            print(f"Error fetching from {url}: {e}")
+            print(f"Error fetching {url}: {e}")
 
-    # فیلتر هوشمند: فقط پروکسی‌هایی که Fake TLS هستند (دانلود و آپلود واقعی دارند)
-    fast_proxies = []
+    # برعکس کردن لیست برای تست از جدیدترین به قدیمی‌ترین
+    raw_proxies.reverse()
+
+    verified_proxies = []
+    print("Testing proxies latency and availability...")
+
     for p in raw_proxies:
         parsed = urllib.parse.urlparse(p)
         params = urllib.parse.parse_qs(parsed.query)
-        secret = params.get("secret", [""])[0]
-        
-        # پروکسی‌هایی که سکرت آنها با ee شروع می‌شود تکنولوژی ضد مسدودسازی و دانلود روان دارند
-        if secret.startswith("ee"):
-            fast_proxies.append(p)
+        server = params.get("server", [None])[0]
+        port = params.get("port", [None])[0]
 
-    # اگر پروکسی Fake TLS پیدا نشد، از بقیه موارد بردار تا چنل خالی نماند
-    if not fast_proxies:
-        fast_proxies = raw_proxies
+        if server and port:
+            # ربات خودش پورت و سرور را تست پینگ می‌کند
+            if check_proxy_alive(server, port):
+                print(f"✅ Verified Alive: {server}:{port}")
+                verified_proxies.append(p)
+                if len(verified_proxies) == 3:
+                    break
+            else:
+                print(f"❌ Dead/Slow Proxy skipped: {server}:{port}")
 
-    return fast_proxies
+    return verified_proxies
 
 def send_to_channel(proxy_list):
     parsed = urllib.parse.urlparse(proxy_list[0])
@@ -88,7 +109,7 @@ def send_to_channel(proxy_list):
     req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            print("Successfully sent high-speed proxies to channel!")
+            print("Successfully sent 3 tested live proxies!")
     except urllib.error.HTTPError as e:
         print(f"Failed to send: {e.code} - {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
@@ -99,9 +120,8 @@ if __name__ == "__main__":
         print("Error: BOT_TOKEN is empty!")
         exit(1)
     
-    proxies = get_high_speed_proxies()
-    if proxies:
-        selected_3 = proxies[-3:] if len(proxies) >= 3 else proxies
-        send_to_channel(selected_3)
+    live_proxies = get_live_highspeed_proxies()
+    if live_proxies:
+        send_to_channel(live_proxies)
     else:
-        print("No proxies found.")
+        print("No alive fast proxies found in this cycle.")
