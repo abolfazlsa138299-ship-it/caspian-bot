@@ -32,9 +32,17 @@ def get_latest_proxies():
     return proxies
 
 def send_to_channel(proxy_list):
+    # دریافت سرور و پورت از اولین پروکسی
+    parsed = urllib.parse.urlparse(proxy_list[0])
+    params = urllib.parse.parse_qs(parsed.query)
+    server = params.get("server", ["Unknown"])[0]
+    port = params.get("port", ["443"])[0]
+
     caption = (
         "⚡️ <b>پروکسی کاسپین | PROXY</b>\n\n"
         "🚀 <b>پروکسی پرسرعت و ضدفیلتر Caspian</b>\n"
+        f"📡 سرور: <code>{server}</code>\n"
+        f"🔌 پورت: <code>{port}</code>\n"
         "📶 مخصوص: همراه اول، ایرانسل و رایتل ⚡️\n\n"
         "🤍 با فوروارد کردن از ما حمایت کنید\n"
         "🆔 @proxy_caspian"
@@ -63,7 +71,7 @@ def send_to_channel(proxy_list):
     req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            print("Successfully sent 3 proxies to channel!")
+            print("Successfully sent 3 proxies with server details!")
     except urllib.error.HTTPError as e:
         print(f"Failed to send: {e.code} - {e.read().decode('utf-8', errors='ignore')}")
     except Exception as e:
