@@ -1,238 +1,264 @@
-import os
-import sqlite3
+import html
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-import urllib.request
-import urllib.parse
-import urllib.error
-import time
+import os
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import time
+import urllib.parse
+import urllib.request
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y")
+# تنظیمات ربات و کانال
+BOT_TOKEN = "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y"
 MAIN_CHANNEL = "@proxy_caspian"
-VIP_INVITE_LINK = "https://t.me/+kRHTDOtFljQ1NzBk"
-SUB_LINK = "https://raw.githubusercontent.com/abolfazlsa138299-ship-it/caspian-bot/main/sub.txt"
+VIP_LINK = "https://t.me/+kRHTDOtFljQ1NzBk"
+SUB_URL = "https://raw.githubusercontent.com/abolfazlsa138299-ship-it/caspian-bot/main/sub.txt"
 
-# ----------------- وب‌سرور برای روشن ماندن ۲۴ ساعته -----------------
-class HealthCheck(BaseHTTPRequestHandler):
+# آیدی تلگرام شما (مالک و مدیر کل مجموعه)
+ADMIN_ID = 9224931872
+
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# دیتابیس ساده در حافظه برای رفرال‌ها
+# {user_id: {"inviter": inviter_id, "confirmed_invites": set()}}
+users_db = {}
+
+
+# --- سرور وب کوچک برای زنده نگه داشتن برنامه در رندر (Render) ---
+class SimpleWebServer(BaseHTTPRequestHandler):
+
     def do_GET(self):
         self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"Caspian Bot is Online!")
+        self.wfile.write(b"Caspian Referral Bot is Running 24/7!")
 
-def run_web():
+    def log_message(self, format, *args):
+        return  # خاموش کردن لاگ‌های اضافه وب
+
+
+def start_web_server():
     port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheck)
+    server = HTTPServer(("0.0.0.0", port), SimpleWebServer)
+    print(f"[*] وب‌سرور Render روی پورت {port} روشن شد.")
     server.serve_forever()
 
-threading.Thread(target=run_web, daemon=True).start()
 
-# ----------------- پایگاه داده (SQLite) -----------------
-conn = sqlite3.connect("caspian_referral.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    referrer_id INTEGER,
-    joined_time INTEGER
-)
-''')
-
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS referrals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    referrer_id INTEGER,
-    invited_id INTEGER UNIQUE,
-    verified INTEGER DEFAULT 0
-)
-''')
-conn.commit()
-
-# ----------------- توابع کار با تلگرام -----------------
-def telegram_api(method, data=None):
+# --- ارتباط با API تلگرام ---
+def tg_api(method, payload):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    if data:
-        encoded_data = json.dumps(data).encode("utf-8")
-        req = urllib.request.Request(url, data=encoded_data, headers={"Content-Type": "application/json"})
-    else:
-        req = urllib.request.Request(url)
+    data = urllib.parse.urlencode(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        print(f"API Error ({method}): {e}")
-        return None
+        return {"ok": False, "error": str(e)}
 
-def is_user_member(user_id):
-    res = telegram_api("getChatMember", {"chat_id": MAIN_CHANNEL, "user_id": user_id})
-    if res and res.get("ok"):
-        status = res["result"].get("status")
+
+def is_member(user_id):
+    """بررسی عضویت کاربر در کانال اصلی"""
+    res = tg_api(
+        "getChatMember", {"chat_id": MAIN_CHANNEL, "user_id": user_id}
+    )
+    if res.get("ok"):
+        status = res.get("result", {}).get("status", "")
         return status in ["member", "administrator", "creator"]
     return False
 
-def get_referral_count(user_id):
-    cursor.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND verified = 1", (user_id,))
-    return cursor.fetchone()[0]
 
-def send_message(chat_id, text, reply_markup=None):
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    return telegram_api("sendMessage", payload)
+def get_admin_keyboard():
+    """کیبورد مخصوص ادمین"""
+    return json.dumps(
+        {
+            "keyboard": [
+                [{"text": "👥 دریافت لینک دعوت"}, {"text": "📊 آمار دعوت‌های من"}],
+                [{"text": "🧪 تست ساب‌اسکریپشن (مدیریت)"}],
+            ],
+            "resize_keyboard": True,
+        }
+    )
 
-def get_main_keyboard():
-    return {
-        "inline_keyboard": [
-            [{"text": "🔗 دریافت لینک دعوت اختصاصی", "callback_data": "get_link"}],
-            [{"text": "📊 آمار دعوت و جوایز من", "callback_data": "my_stats"}],
-            [{"text": "🎁 صندوق دریافت جوایز", "callback_data": "claim_rewards"}],
-            [{"text": "⚡️ عضویت در کانال اصلی کاسپین", "url": "https://t.me/proxy_caspian"}]
-        ]
-    }
+
+def get_user_keyboard():
+    """کیبورد عادی برای کاربران"""
+    return json.dumps(
+        {
+            "keyboard": [
+                [{"text": "👥 دریافت لینک دعوت"}, {"text": "📊 آمار دعوت‌های من"}]
+            ],
+            "resize_keyboard": True,
+        }
+    )
+
+
+def handle_admin_test_sub(chat_id):
+    """دریافت آخرین محتوای sub.txt و ارسال آن برای ادمین جهت تست"""
+    try:
+        req = urllib.request.Request(SUB_URL, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content = resp.read().decode("utf-8", errors="ignore").strip()
+            lines = [line.strip() for line in content.split("\n") if line.strip()]
+
+        if not lines:
+            tg_api(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": "⚠️ فایل sub.txt در حال حاضر خالی است یا در گیت‌هاب لود نشد.",
+                },
+            )
+            return
+
+        # گرفتن ۳ کانفیگ اول برای تست فوری
+        sample_configs = lines[:3]
+        formatted_cfgs = "\n\n".join(
+            [f"🔹 <code>{html.escape(c)}</code>" for c in sample_configs]
+        )
+
+        msg = (
+            "👑 <b>پنل دسترسی مستقیم مدیریت کاسپین</b> 👑\n\n"
+            f"📊 <b>تعداد کل کانفیگ‌های فعال در ساب:</b> {len(lines)} عدد\n\n"
+            "🔍 <b>۳ کانفیگ تازه‌نفس فعلی (یکبار ضربه بزنید تا کپی شود):</b>\n\n"
+            f"{formatted_cfgs}\n\n"
+            f"🔗 <b>لینک مستقیم ساب‌اسکریپشن:</b>\n<code>{SUB_URL}</code>"
+        )
+
+        tg_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": msg,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+        )
+    except Exception as e:
+        tg_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": f"❌ خطا در خواندن لینک ساب‌اسکریپشن: {e}",
+            },
+        )
+
 
 def handle_message(msg):
-    chat_id = msg["chat"]["id"]
-    text = msg.get("text", "")
+    chat_id = msg.get("chat", {}).get("id")
+    user_id = msg.get("from", {}).get("id")
+    text = msg.get("text", "").strip()
 
+    if not chat_id or not user_id:
+        return
+
+    is_admin = user_id == ADMIN_ID
+    reply_kb = get_admin_keyboard() if is_admin else get_user_keyboard()
+
+    if user_id not in users_db:
+        users_db[user_id] = {"inviter": None, "confirmed_invites": set()}
+
+    # دستور استارت
     if text.startswith("/start"):
         parts = text.split()
-        referrer_id = None
-        if len(parts) > 1 and parts[1].startswith("ref_"):
-            try:
-                referrer_id = int(parts[1].replace("ref_", ""))
-            except:
-                referrer_id = None
-
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (chat_id,))
-        exists = cursor.fetchone()
-
-        if not exists:
-            cursor.execute("INSERT INTO users (user_id, referrer_id, joined_time) VALUES (?, ?, ?)",
-                           (chat_id, referrer_id, int(time.time())))
-            conn.commit()
-
-            if referrer_id and referrer_id != chat_id:
-                if is_user_member(chat_id):
-                    cursor.execute("INSERT OR IGNORE INTO referrals (referrer_id, invited_id, verified) VALUES (?, ?, 1)",
-                                   (referrer_id, chat_id))
-                    conn.commit()
-                    count = get_referral_count(referrer_id)
-                    send_message(referrer_id, f"🎉 <b>تبریک! یک نفر با لینک شما عضو شد.</b>\n👥 تعداد کل دعوت‌های تاییدشده شما: <b>{count}</b> نفر")
-                    check_and_notify_rewards(referrer_id, count)
-                else:
-                    cursor.execute("INSERT OR IGNORE INTO referrals (referrer_id, invited_id, verified) VALUES (?, ?, 0)",
-                                   (referrer_id, chat_id))
-                    conn.commit()
+        if len(parts) > 1 and parts[1].isdigit():
+            inviter_id = int(parts[1])
+            if inviter_id != user_id and users_db[user_id]["inviter"] is None:
+                users_db[user_id]["inviter"] = inviter_id
 
         welcome_text = (
-            "⚡️ <b>به ربات رسمی جوایز پروکسی کاسپین خوش آمدید!</b>\n\n"
-            "🎁 <b>طرح دعوت و دریافت فیلترشکن رایگان (بدون قرعه‌کشی):</b>\n"
-            "🔹 با دعوت <b>۵ نفر</b> ⬅️ عضویت در <b>کانال اختصاصی VIP کاسپین</b>\n"
-            "🔹 با دعوت <b>۱۰ نفر</b> ⬅️ دریافت <b>لینک اشتراک هوشمند (Sub)</b> با آپدیت خودکار\n\n"
-            "👇 از دکمه‌های زیر برای دریافت لینک دعوت و مشاهده آمار خود استفاده کنید:"
+            "سلام به مجموعه ارتباطی کاسپین خوش آمدید ⚜️\n\n"
+            "با دعوت دوستانتان به کانال، جوایز پرسرعت و بدون فیلتر دریافت کنید:\n"
+            "▫️ ۵ دعوت موفق ⬅️ ورود دائمی به کانال اختصاصی VIP\n"
+            "▫️ ۱۰ دعوت موفق ⬅️ دریافت ساب‌اسکریپشن هوشمند کاسپین\n\n"
+            "جهت شروع از دکمه‌های زیر استفاده کنید:"
         )
-        send_message(chat_id, welcome_text, get_main_keyboard())
+        tg_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": welcome_text,
+                "reply_markup": reply_kb,
+            },
+        )
+        return
 
-def check_and_notify_rewards(user_id, count):
-    if count == 5:
-        send_message(user_id, (
-            "🎉🔥 <b>تبریک! شما به ۵ دعوت رسیدید!</b>\n\n"
-            "🎁 جایزه اول شما فعال شد: ورود به کانال اختصاصی VIP کاسپین\n"
-            f"🔗 <b>لینک ورود مستقیم:</b>\n{VIP_INVITE_LINK}"
-        ))
-    elif count == 10:
-        send_message(user_id, (
-            "🏆🔥 <b>شاهکار کردید! شما به ۱۰ دعوت رسیدید!</b>\n\n"
-            "🎁 جایزه دوم شما: <b>لینک ساب‌اسکریپشن هوشمند کاسپین</b>\n"
-            "این لینک را داخل برنامه V2rayNG / Hiddify / v2box قرار دهید:\n\n"
-            f"<code>{SUB_LINK}</code>\n\n"
-            "🔄 با هر بار زدن دکمه Update در برنامه، کانفیگ‌های تازه و پرسرعت لود می‌شوند."
-        ))
+    # دستور اختصاصی ادمین
+    if is_admin and (
+        text == "🧪 تست ساب‌اسکریپشن (مدیریت)" or "تست ساب" in text.lower()
+    ):
+        handle_admin_test_sub(chat_id)
+        return
 
-def handle_callback(cb):
-    cb_id = cb["id"]
-    chat_id = cb["message"]["chat"]["id"]
-    data = cb.get("data", "")
-    bot_username = "CaspianProxyBot"
-
-    cursor.execute("SELECT referrer_id FROM referrals WHERE invited_id = ? AND verified = 0", (chat_id,))
-    pending = cursor.fetchone()
-    if pending and is_user_member(chat_id):
-        ref_id = pending[0]
-        cursor.execute("UPDATE referrals SET verified = 1 WHERE invited_id = ?", (chat_id,))
-        conn.commit()
-        count = get_referral_count(ref_id)
-        send_message(ref_id, f"🎉 <b>یک کاربر دعوت‌شده عضو کانال شد!</b>\n👥 کل دعوت‌های شما: <b>{count}</b> نفر")
-        check_and_notify_rewards(ref_id, count)
-
-    if data == "get_link":
-        ref_link = f"https://t.me/{bot_username}?start=ref_{chat_id}"
-        msg = (
+    # دریافت لینک دعوت
+    if text == "👥 دریافت لینک دعوت":
+        invite_link = f"https://t.me/CaspianProxyBot?start={user_id}"
+        resp_msg = (
             "🔗 <b>لینک دعوت اختصاصی شما:</b>\n\n"
-            f"<code>{ref_link}</code>\n\n"
-            "📌 این لینک را برای دوستان، گروه‌ها یا مخاطبین خود بفرستید.\n"
-            "به محض اینکه وارد ربات و عضو کانال @proxy_caspian شوند، امتیاز برای شما ثبت می‌شود!"
+            f"<code>{invite_link}</code>\n\n"
+            "این لینک را برای دوستان یا در گروه‌ها بفرستید. به ازای هر نفری که عضو کانال شود، امتیاز شما ثبت خواهد شد."
         )
-        send_message(chat_id, msg, get_main_keyboard())
-
-    elif data == "my_stats":
-        count = get_referral_count(chat_id)
-        remain_vip = max(0, 5 - count)
-        remain_sub = max(0, 10 - count)
-        
-        status_vip = "✅ دریافت شده" if count >= 5 else f"⏳ {remain_vip} نفر مانده"
-        status_sub = "✅ دریافت شده" if count >= 10 else f"⏳ {remain_sub} نفر مانده"
-
-        msg = (
-            "📊 <b>آمار و وضعیت زیرمجموعه‌های شما:</b>\n\n"
-            f"👥 تعداد دعوت‌های تاییدشده: <b>{count} نفر</b>\n\n"
-            f"🎁 <b>کانال اختصاصی VIP (۵ دعوت):</b> {status_vip}\n"
-            f"🎁 <b>لینک ساب هوشمند (۱۰ دعوت):</b> {status_sub}\n"
+        tg_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": resp_msg,
+                "parse_mode": "HTML",
+                "reply_markup": reply_kb,
+            },
         )
-        send_message(chat_id, msg, get_main_keyboard())
+        return
 
-    elif data == "claim_rewards":
-        count = get_referral_count(chat_id)
-        if count < 5:
-            msg = f"❌ شما هنوز به حداقل دعوت (۵ نفر) نرسیده‌اید.\nتعداد دعوت فعلی شما: <b>{count}</b> نفر"
-        elif 5 <= count < 10:
-            msg = (
-                "🎁 <b>جایزه سطح ۱ شما فعال است:</b>\n\n"
-                f"🔗 ورود به کانال اختصاصی VIP:\n{VIP_INVITE_LINK}\n\n"
-                f"💡 با دعوت <b>{10 - count}</b> نفر دیگر، لینک اشتراک هوشمند (Sub) را هم دریافت کنید!"
-            )
+    # آمار دعوت‌ها و بررسی اهدا جوایز
+    if text == "📊 آمار دعوت‌های من":
+        # بررسی عضویت کسانی که این کاربر دعوت کرده
+        confirmed = 0
+        for uid, data in users_db.items():
+            if data.get("inviter") == user_id:
+                if is_member(uid):
+                    confirmed += 1
+
+        stats_msg = f"📊 <b>وضعیت دعوت‌های شما:</b>\n\n" f"👥 تعداد افراد دعوت‌شده و فعال: <b>{confirmed} نفر</b>\n\n"
+
+        if is_admin:
+            stats_msg += "👑 شما مدیر کل سیستم هستید و به تمام بخش‌ها دسترسی نامحدود دارید."
+        elif confirmed >= 10:
+            stats_msg += f"🎉 تبریک! شما به سقف ۱۰ دعوت رسیدید:\n\n🔗 لینک ساب‌اسکریپشن شما:\n<code>{SUB_URL}</code>\n\n👑 لینک کانال VIP:\n{VIP_LINK}"
+        elif confirmed >= 5:
+            stats_msg += f"🎁 تبریک! ۵ دعوت شما تکمیل شد:\n\n👑 لینک ورود به کانال اختصاصی VIP:\n{VIP_LINK}\n\n(با ۵ دعوت دیگر، لینک ساب‌اسکریپشن هوشمند را هم دریافت می‌کنید!)"
         else:
-            msg = (
-                "🏆 <b>همه جوایز برای شما باز شده است:</b>\n\n"
-                f"1️⃣ <b>لینک کانال اختصاصی VIP:</b>\n{VIP_INVITE_LINK}\n\n"
-                f"2️⃣ <b>لینک ساب‌اسکریپشن هوشمند کاسپین:</b>\n<code>{SUB_LINK}</code>"
-            )
-        send_message(chat_id, msg, get_main_keyboard())
+            stats_msg += f"برای دریافت لینک VIP هنوز به {5 - confirmed} دعوت دیگر نیاز دارید."
 
-    telegram_api("answerCallbackQuery", {"callback_query_id": cb_id})
+        tg_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": stats_msg,
+                "parse_mode": "HTML",
+                "reply_markup": reply_kb,
+            },
+        )
+        return
 
-def main():
-    print("ربات رفرال کاسپین آنلاین شد...")
-    last_update_id = 0
+
+def polling_loop():
+    offset = 0
+    print("[*] حلقه Polling ربات فعال شد.")
     while True:
         try:
-            updates = telegram_api("getUpdates", {"offset": last_update_id + 1, "timeout": 20})
-            if updates and updates.get("ok"):
-                for u in updates["result"]:
-                    last_update_id = u["update_id"]
-                    if "message" in u:
-                        handle_message(u["message"])
-                    elif "callback_query" in u:
-                        handle_callback(u["callback_query"])
+            res = tg_api("getUpdates", {"offset": offset, "timeout": 20})
+            if res.get("ok"):
+                for update in res.get("result", []):
+                    offset = update["update_id"] + 1
+                    if "message" in update:
+                        handle_message(update["message"])
         except Exception as e:
-            print(f"خطای حلقه اصلی: {e}")
             time.sleep(2)
+        time.sleep(0.5)
+
 
 if __name__ == "__main__":
-    main()
+    # اجرای وب‌سرور در پس‌زمینه برای Render
+    t = threading.Thread(target=start_web_server, daemon=True)
+    t.start()
+
+    # اجرای هسته ربات
+    polling_loop()
