@@ -1,0 +1,30 @@
+name: Auto Update Caspian Sub
+
+on:
+  schedule:
+    # آپدیت خودکار هر ۴ ساعت یکبار (۶ بار در شبانه‌روز)
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-sub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: دریافت سورس
+        uses: actions/checkout@v4
+
+      - name: نصب پایتون
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: اجرای آپدیت ساب‌اسکریپشن
+        run: python update_sub.py
+
+      - name: ذخیره و انتشار در گیت‌هاب
+        run: |
+          git config --global user.name "Caspian AutoBot"
+          git config --global user.email "bot@caspian.com"
+          git add sub.txt
+          git commit -m "Auto update Caspian V2Ray & NPV configs [skip ci]" || exit 0
+          git push
