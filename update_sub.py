@@ -2,73 +2,40 @@ import os
 import json
 import urllib.request
 import re
-import socket
 import urllib.parse
 import base64
 import html
-from concurrent.futures import ThreadPoolExecutor
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y")
-VIP_CHANNEL_ID = -1005629553208  # آیدی کانال VIP شما
+BOT_TOKEN = "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y"
+VIP_CHANNEL_ID = -1005629553208
 
-# سورس‌های اختصاصی VLESS Reality (تنها پروتکل فعال در ایران)
+# معتبرترین سورس‌های کانفیگ VLESS Reality مخصوص ایران
 SOURCES = [
     "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/protocols/reality",
-    "https://raw.githubusercontent.com/yebekhe/Telegram-V2ray-Configs/main/sub/reality",
     "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Splitted-By-Protocol/vless.txt",
     "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/reality"
 ]
 
-def decode_base64_if_needed(text):
-    text = text.strip()
-    try:
-        decoded = base64.b64decode(text).decode('utf-8', errors='ignore')
-        if "vless://" in decoded:
-            return decoded
-    except Exception:
-        pass
-    return text
-
-def fetch_configs():
-    raw_configs = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    for src in SOURCES:
+def fetch_reality_configs():
+    found = []
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for url in SOURCES:
         try:
-            req = urllib.request.Request(src, headers=headers)
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
-                content = resp.read().decode("utf-8", errors="ignore")
-                decoded_content = decode_base64_if_needed(content)
-                for line in decoded_content.splitlines():
+                text = resp.read().decode("utf-8", errors="ignore")
+                for line in text.splitlines():
                     line = line.strip()
-                    # فقط و فقط VLESS (مخصوصاً Reality) - حذف کامل پروتکل‌های سوخته مثل ss
                     if line.startswith("vless://") and ("reality" in line.lower() or "security=reality" in line.lower() or "443" in line):
-                        raw_configs.append(line)
+                        if line not in found:
+                            found.append(line)
         except Exception as e:
-            print(f"خطا در دریافت: {e}")
-    return list(set(raw_configs))
-
-def check_config_alive(config):
-    try:
-        parsed = urllib.parse.urlparse(config)
-        host = parsed.hostname
-        port = parsed.port
-        if not host or not port:
-            return None
-
-        # تست سریع سوکت
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1.0)
-        res = sock.connect_ex((host, int(port)))
-        sock.close()
-
-        if res == 0:
-            return config
-    except:
-        pass
-    return None
+            print(f"Error reading {url}: {e}")
+        if len(found) >= 20:
+            break
+    return found
 
 def send_vip_post(configs):
-    """ارسال پست با چیدمان ۲ تایی از هر نوع (مجموعاً ۶ کانفیگ)"""
     v2_1 = html.escape(configs[0].split("#")[0] + "#⚡️ Caspian | V2Ray 1")
     v2_2 = html.escape(configs[1].split("#")[0] + "#⚡️ Caspian | V2Ray 2")
 
@@ -95,7 +62,7 @@ def send_vip_post(configs):
         "و داخل برنامه اضافه کنید."
     )
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": VIP_CHANNEL_ID,
         "text": caption,
@@ -103,45 +70,25 @@ def send_vip_post(configs):
         "disable_web_page_preview": True
     }
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            print("پست ۶ تایی با موفقیت به کانال VIP ارسال شد!")
-    except Exception as e:
-        print(f"خطا در ارسال به کانال VIP: {e}")
+    req = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"})
+    
+    with urllib.request.urlopen(req, timeout=12) as response:
+        print("پیام با موفقیت به تلگرام ارسال شد!")
 
 def main():
-    print("شروع استخراج کانفیگ‌های ضدفیلتر VLESS Reality...")
-    all_configs = fetch_configs()
-    print(f"تعداد {len(all_configs)} کانفیگ Reality پیدا شد. در حال پینگ گرفتن...")
+    configs = fetch_reality_configs()
+    if not configs:
+        print("کانفیگی پیدا نشد.")
+        return
 
-    alive_configs = []
-    with ThreadPoolExecutor(max_workers=30) as executor:
-        results = executor.map(check_config_alive, all_configs[:100])
-        for r in results:
-            if r:
-                alive_configs.append(r)
-                if len(alive_configs) >= 15:
-                    break
+    # ذخیره در فایل ساب‌اسکریپشن
+    with open("sub.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(configs[:15]))
+    print("فایل sub.txt به‌روزرسانی شد.")
 
-    if alive_configs:
-        # آپدیت فایل ساب‌اسکریپشن
-        final_labeled = []
-        for i, cfg in enumerate(alive_configs):
-            base_url = cfg.split("#")[0]
-            tag = f"⚡️ Caspian Reality #{i+1}"
-            final_labeled.append(f"{base_url}#{urllib.parse.quote(tag)}")
-
-        with open("sub.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(final_labeled))
-        print("فایل sub.txt آپدیت شد.")
-
-        # ارسال پست ۶ تایی به کانال VIP
-        if len(alive_configs) >= 6:
-            send_vip_post(alive_configs[:6])
-        elif len(alive_configs) >= 3:
-            # اگر کمتر از ۶ تا بود باز هم دوتایی پرش کن تا پست ناقص نمونه
-            send_vip_post((alive_configs * 2)[:6])
+    # ارسال ۶ کانفیگ به کانال VIP
+    vip_selected = configs[:6] if len(configs) >= 6 else (configs * 6)[:6]
+    send_vip_post(vip_selected)
 
 if __name__ == "__main__":
     main()
