@@ -65,15 +65,14 @@ def check_config_alive(config):
     return None
 
 def send_vip_post(cfg1, cfg2, cfg3):
-    """ارسال پست دقیقا مطابق با قالب درخواستی شما"""
-    # تمیزکاری کانفیگ‌ها و برچسب شیک
+    """ارسال پست دقیقاً با عنوان اصلاح شده و قالب درخواستی شما"""
     c1 = html.escape(cfg1.split("#")[0] + "#⚡️ Caspian | V2Ray")
     c2 = html.escape(cfg2.split("#")[0] + "#⚡️ Caspian | NPV Tunnel")
     c3 = html.escape(cfg3.split("#")[0] + "#⚡️ Caspian | دوکاره (V2Ray + NPV)")
 
     caption = (
-        "👑 <b>کاسپین VIP پست اختصاصی اعضای</b> 👑\n\n"
-        ":کانفیگ‌های پرسرعت و تست‌شده اختصاصی\n\n"
+        "👑 <b>پست اختصاصی اعضای کاسپین VIP</b> 👑\n\n"
+        "کانفیگ‌های پرسرعت و تست‌شده اختصاصی:\n\n"
         "🔹 <b>کانفیگ اول (مخصوص V2Ray):</b>\n"
         f"<code>{c1}</code>\n\n"
         "🔹 <b>کانفیگ دوم (مخصوص NPV Tunnel):</b>\n"
@@ -113,7 +112,7 @@ def main():
                     break
 
     if alive_configs:
-        # ۱. ذخیره ۱۵ کانفیگ در ساب‌اسکریپشن
+        # ۱. ذخیره در ساب‌اسکریپشن
         final_labeled = []
         for i, cfg in enumerate(alive_configs):
             base_url = cfg.split("#")[0]
@@ -124,7 +123,7 @@ def main():
             f.write("\n".join(final_labeled))
         print("فایل sub.txt آپدیت شد.")
 
-        # ۲. ارسال پست ۳ تایی به کانال VIP با همان ظاهر زیبا
+        # ۲. ارسال پست ۳ تایی اصلاح‌شده به کانال VIP
         if len(alive_configs) >= 3:
             send_vip_post(alive_configs[0], alive_configs[1], alive_configs[2])
 
