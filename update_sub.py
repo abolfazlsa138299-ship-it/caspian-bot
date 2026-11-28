@@ -8,11 +8,9 @@ import urllib.request
 import urllib.parse
 import json
 
-# --- Config & Targets ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y")
 VIP_CHANNEL_ID = "-1005629553208"
 SUB_FILE = "sub.txt"
-NPVS_FILE_NAME = "Caspian_VIP.npvs"
 
 SOURCES = [
     "https://t.me/s/v2rayngvpn",
@@ -75,47 +73,45 @@ def brand_config(config_str, tag):
     base = config_str.split("#")[0]
     return f"{base}#{clean_tag}"
 
-# ارسال فایل بدون نیاز به هیچ کتابخانه جانبی با پروتکل مستقیم تلگرام
-def send_telegram_document(chat_id, file_path, caption):
-    boundary = "----CaspianBoundary" + os.urandom(16).hex()
-    filename = os.path.basename(file_path)
-    with open(file_path, "rb") as f:
-        file_bytes = f.read()
+def escape_for_html(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    body = []
-    # chat_id
-    body.append(f"--{boundary}".encode())
-    body.append(b'Content-Disposition: form-data; name="chat_id"')
-    body.append(b"")
-    body.append(str(chat_id).encode())
-    # caption
-    body.append(f"--{boundary}".encode())
-    body.append(b'Content-Disposition: form-data; name="caption"')
-    body.append(b"")
-    body.append(caption.encode("utf-8"))
-    # parse_mode
-    body.append(f"--{boundary}".encode())
-    body.append(b'Content-Disposition: form-data; name="parse_mode"')
-    body.append(b"")
-    body.append(b"HTML")
-    # document
-    body.append(f"--{boundary}".encode())
-    body.append(f'Content-Disposition: form-data; name="document"; filename="{filename}"'.encode())
-    body.append(b"Content-Type: application/octet-stream")
-    body.append(b"")
-    body.append(file_bytes)
-    # end boundary
-    body.append(f"--{boundary}--".encode())
-    body.append(b"")
-
-    payload = b"\r\n".join(body)
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-        data=payload,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+def post_vip_message(v1, v2, n1, n2, t1, t2):
+    message_text = (
+        "👑 <b>کانفیگ اختصاصی اعضای VIP کاسپین</b> 👑\n\n"
+        "♨️ <b>کانفیگ‌های پرسرعت و تست‌شده اختصاصی:</b>\n"
+        "💡 <i>کافیست روی هر کادر ضربه بزنید تا کانفیگ فوراً کپی شود.</i>\n\n"
+        "🔹 <b>کانفیگ‌های مخصوص V2Ray:</b>\n\n"
+        f"▫️ سرور ۱ (پینگ فوق‌العاده):\n<code>{escape_for_html(v1)}</code>\n\n"
+        f"▫️ سرور ۲ (پایدار و بدون قطعی):\n<code>{escape_for_html(v2)}</code>\n\n"
+        "🔹 <b>کانفیگ‌های مخصوص NPV Tunnel:</b>\n\n"
+        f"▫️ سرور ۱ (اتصال سریع):\n<code>{escape_for_html(n1)}</code>\n\n"
+        f"▫️ سرور ۲ (همراه اول و ایرانسل):\n<code>{escape_for_html(n2)}</code>\n\n"
+        "🔹 <b>کانفیگ‌های سوپر توربو (دوکاره):</b>\n\n"
+        f"▫️ سرور توربو ۱ ⚡️:\n<code>{escape_for_html(t1)}</code>\n\n"
+        f"▫️ سرور توربو ۲ ⚡️:\n<code>{escape_for_html(t2)}</code>\n\n"
+        "📶 <b>مناسب برای:</b> همراه اول، ایرانسل، رایتل و مخابرات 📊\n"
+        "🆔 @proxy_caspian"
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        print("Document posted to VIP channel successfully!")
+
+    send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": VIP_CHANNEL_ID,
+        "text": message_text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+
+    try:
+        req = urllib.request.Request(
+            send_url,
+            data=urllib.parse.urlencode(payload).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            print("VIP message posted successfully!")
+    except Exception as e:
+        print(f"Failed to post VIP message: {e}")
 
 def main():
     print("Scraping Caspian VIP channels...")
@@ -151,12 +147,10 @@ def main():
     c_t1 = brand_config(valid_configs[0], "Turbo-1")
     c_t2 = brand_config(valid_configs[1 % len(valid_configs)], "Turbo-2")
 
-    # ساخت فایل اختصاصی Caspian_VIP.npvs برای اجرای مستقیم در NPV Tunnel
-    npvs_content = "\n".join([c_n1, c_n2, c_t1, c_t2, c_v1, c_v2])
-    with open(NPVS_FILE_NAME, "w", encoding="utf-8") as f:
-        f.write(npvs_content)
+    # انتشار پست کامل در کانال VIP
+    post_vip_message(c_v1, c_v2, c_n1, c_n2, c_t1, c_t2)
 
-    # ساخت و ذخیره ساب‌اسکریپشن ۷ تایی
+    # ساخت ساب‌اسکریپشن ۷ تایی برای اتصال خودکار
     sub_7 = [c_v1, c_v2, c_n1, c_n2, c_t1, c_t2]
     if len(valid_configs) > 2:
         sub_7.append(brand_config(valid_configs[2], "Backup"))
@@ -165,24 +159,7 @@ def main():
 
     with open(SUB_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(sub_7) + "\n")
-
-    # متن شیک و حرفه‌ای برای کانال VIP
-    caption = (
-        "👑 <b>کانفیگ اختصاصی اعضای VIP کاسپین</b> 👑\n\n"
-        "⚡️ <b>فایل اختصاصی NPV Tunnel:</b>\n"
-        "کافیست روی فایل پیوست بالا ضربه بزنید تا مستقیماً با برنامه <b>NPV Tunnel</b> باز و متصل شود.\n\n"
-        "🔹 <b>کانفیگ‌های مخصوص V2Ray (لمس کنید تا کپی شود):</b>\n\n"
-        f"▫️ سرور ۱:\n<code>{c_v1}</code>\n\n"
-        f"▫️ سرور ۲:\n<code>{c_v2}</code>\n\n"
-        "📶 مناسب همراه اول، ایرانسل، رایتل و مخابرات 📊\n"
-        "🆔 @proxy_caspian"
-    )
-
-    # ارسال فایل سند به تلگرام
-    try:
-        send_telegram_document(VIP_CHANNEL_ID, NPVS_FILE_NAME, caption)
-    except Exception as e:
-        print(f"Failed to send document: {e}")
+    print("Wrote exactly 7 configs to sub.txt successfully.")
 
 if __name__ == "__main__":
     main()
