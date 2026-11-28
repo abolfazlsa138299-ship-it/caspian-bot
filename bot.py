@@ -2,28 +2,19 @@ import os
 import re
 import socket
 import time
+import html
 import urllib.request
 import urllib.parse
 import json
 
-# --- Configurations ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y")
 CHANNEL_ID = "@proxy_caspian"
 
-# منابع سالم، فعال و زنده پروکسی تلگرام (MTProto)
 SOURCES = [
     "https://t.me/s/ProxyNP",
     "https://t.me/s/ProxyDotNet",
-    "https://t.me/s/ProxyMTProto",
-    "https://t.me/s/TelMTProto"
-]
-
-# پروکسی‌های رزرو و اضطراری
-BACKUP_PROXIES = [
-    {"server": "149.154.175.50", "port": 443, "secret": "ee00000000000000000000000000000000676f6f676c652e636f6d"},
-    {"server": "91.108.56.165", "port": 443, "secret": "ee111111111111111111111111111111117777772e636c6f7564666c6172652e636f6d"},
-    {"server": "149.154.175.55", "port": 443, "secret": "ee222222222222222222222222222222227777772e77696b6970656469612e6f7267"},
-    {"server": "91.108.56.170", "port": 443, "secret": "ee3333333333333333333333333333333379616e6465782e7275"}
+    "https://t.me/s/TelMTProto",
+    "https://t.me/s/ProxyMTProto"
 ]
 
 def fetch_url(url):
@@ -32,74 +23,74 @@ def fetch_url(url):
         with urllib.request.urlopen(req, timeout=12) as response:
             return response.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        print(f"Fetch failed: {e}")
         return ""
 
-def extract_proxies_from_html(html_text):
+def extract_proxies(raw_html):
+    clean_html = html.unescape(raw_html)
     proxies = []
-    matches = re.findall(r"(?:tg://proxy\?|https://t\.me/proxy\?)(server=[^&\"'\s]+&port=[^&\"'\s]+&secret=[^&\"'\s]+)", html_text)
-    for m in matches:
-        params = urllib.parse.parse_qs(m)
-        if "server" in params and "port" in params and "secret" in params:
-            try:
+    pattern = r"(?:https://t\.me/proxy\?|tg://proxy\?)([^\s\"'<>]+)"
+    matches = re.findall(pattern, clean_html)
+    
+    for qs in matches:
+        try:
+            parsed = urllib.parse.parse_qs(qs)
+            server = parsed.get("server", [None])[0]
+            port = parsed.get("port", [None])[0]
+            secret = parsed.get("secret", [None])[0]
+            if server and port and secret:
                 proxies.append({
-                    "server": params["server"][0],
-                    "port": int(params["port"][0]),
-                    "secret": params["secret"][0]
+                    "server": server.strip(),
+                    "port": int(port.strip()),
+                    "secret": secret.strip()
                 })
-            except Exception:
-                continue
+        except Exception:
+            continue
     return proxies
 
-def ping_proxy(proxy, timeout=2.0):
+def ping_proxy(proxy):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        start_time = time.time()
+        sock.settimeout(2.5)
+        start = time.time()
         sock.connect((proxy["server"], proxy["port"]))
-        latency = (time.time() - start_time) * 1000
+        lat = (time.time() - start) * 1000
         sock.close()
-        return round(latency, 2)
+        return round(lat, 2)
     except Exception:
         return 9999
 
 def main():
-    print("Fetching proxies from verified Caspian sources...")
+    print("Scraping live proxies for @proxy_caspian...")
     all_proxies = []
     for src in SOURCES:
-        html = fetch_url(src)
-        p_list = extract_proxies_from_html(html)
-        print(f"Found {len(p_list)} proxies from {src}")
+        content = fetch_url(src)
+        p_list = extract_proxies(content)
         all_proxies.extend(p_list)
 
     seen = set()
-    unique_proxies = []
+    unique = []
     for p in all_proxies:
-        identifier = f"{p['server']}:{p['port']}"
-        if identifier not in seen:
-            seen.add(identifier)
-            unique_proxies.append(p)
+        key = f"{p['server']}:{p['port']}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
 
-    print(f"Total unique proxies found: {len(unique_proxies)}")
+    if not unique:
+        print("No proxies found from channels.")
+        return
 
     tested = []
-    for p in unique_proxies:
-        latency = ping_proxy(p)
-        if latency < 9999:
-            tested.append((latency, p))
+    for p in unique:
+        lat = ping_proxy(p)
+        if lat < 9999:
+            tested.append((lat, p))
 
     tested.sort(key=lambda x: x[0])
-    best_proxies = [p for lat, p in tested]
+    selected = [p for lat, p in tested][:4]
 
-    if len(best_proxies) < 4:
-        for bp in BACKUP_PROXIES:
-            if bp not in best_proxies:
-                best_proxies.append(bp)
-            if len(best_proxies) >= 4:
-                break
-
-    selected = best_proxies[:4]
-    print(f"Selected 4 best low-ping proxies.")
+    if len(selected) < 4:
+        selected = unique[:4]
 
     p1 = f"https://t.me/proxy?server={selected[0]['server']}&port={selected[0]['port']}&secret={selected[0]['secret']}"
     p2 = f"https://t.me/proxy?server={selected[1]['server']}&port={selected[1]['port']}&secret={selected[1]['secret']}"
@@ -117,21 +108,12 @@ def main():
 
     keyboard = {
         "inline_keyboard": [
-            [
-                {"text": "Connect 1", "url": p1},
-                {"text": "Connect 2", "url": p2}
-            ],
-            [
-                {"text": "Connect 3", "url": p3},
-                {"text": "Connect 4", "url": p4}
-            ],
-            [
-                {"text": "⚡️ عضویت در کانال کاسپین ⚡️", "url": "https://t.me/proxy_caspian"}
-            ]
+            [{"text": "Connect 1", "url": p1}, {"text": "Connect 2", "url": p2}],
+            [{"text": "Connect 3", "url": p3}, {"text": "Connect 4", "url": p4}],
+            [{"text": "⚡️ عضویت در کانال کاسپین ⚡️", "url": "https://t.me/proxy_caspian"}]
         ]
     }
 
-    send_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHANNEL_ID,
         "text": caption,
@@ -141,15 +123,12 @@ def main():
     }
 
     req = urllib.request.Request(
-        send_url,
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         data=urllib.parse.urlencode(payload).encode("utf-8"),
         headers={"Content-Type": "application/x-www-form-urlencoded"}
     )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            print("Successfully published proxies to @proxy_caspian!")
-    except Exception as e:
-        print(f"Error publishing to channel: {e}")
+    urllib.request.urlopen(req, timeout=10)
+    print("Proxies published successfully.")
 
 if __name__ == "__main__":
     main()
