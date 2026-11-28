@@ -6,14 +6,13 @@ import html
 import base64
 import urllib.request
 import urllib.parse
-import telebot
+import json
 
+# --- Config & Targets ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9268228114:AAFpg07l6AjXfu5TtdNirukEUZZiLzCBC2Y")
 VIP_CHANNEL_ID = "-1005629553208"
 SUB_FILE = "sub.txt"
 NPVS_FILE_NAME = "Caspian_VIP.npvs"
-
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
 SOURCES = [
     "https://t.me/s/v2rayngvpn",
@@ -76,6 +75,48 @@ def brand_config(config_str, tag):
     base = config_str.split("#")[0]
     return f"{base}#{clean_tag}"
 
+# ارسال فایل بدون نیاز به هیچ کتابخانه جانبی با پروتکل مستقیم تلگرام
+def send_telegram_document(chat_id, file_path, caption):
+    boundary = "----CaspianBoundary" + os.urandom(16).hex()
+    filename = os.path.basename(file_path)
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
+
+    body = []
+    # chat_id
+    body.append(f"--{boundary}".encode())
+    body.append(b'Content-Disposition: form-data; name="chat_id"')
+    body.append(b"")
+    body.append(str(chat_id).encode())
+    # caption
+    body.append(f"--{boundary}".encode())
+    body.append(b'Content-Disposition: form-data; name="caption"')
+    body.append(b"")
+    body.append(caption.encode("utf-8"))
+    # parse_mode
+    body.append(f"--{boundary}".encode())
+    body.append(b'Content-Disposition: form-data; name="parse_mode"')
+    body.append(b"")
+    body.append(b"HTML")
+    # document
+    body.append(f"--{boundary}".encode())
+    body.append(f'Content-Disposition: form-data; name="document"; filename="{filename}"'.encode())
+    body.append(b"Content-Type: application/octet-stream")
+    body.append(b"")
+    body.append(file_bytes)
+    # end boundary
+    body.append(f"--{boundary}--".encode())
+    body.append(b"")
+
+    payload = b"\r\n".join(body)
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
+        data=payload,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        print("Document posted to VIP channel successfully!")
+
 def main():
     print("Scraping Caspian VIP channels...")
     all_raw = []
@@ -115,7 +156,7 @@ def main():
     with open(NPVS_FILE_NAME, "w", encoding="utf-8") as f:
         f.write(npvs_content)
 
-    # ذخیره ساب‌اسکریپشن ۷ تایی
+    # ساخت و ذخیره ساب‌اسکریپشن ۷ تایی
     sub_7 = [c_v1, c_v2, c_n1, c_n2, c_t1, c_t2]
     if len(valid_configs) > 2:
         sub_7.append(brand_config(valid_configs[2], "Backup"))
@@ -137,10 +178,11 @@ def main():
         "🆔 @proxy_caspian"
     )
 
-    # ارسال به صورت Document به کانال VIP
-    with open(NPVS_FILE_NAME, "rb") as doc:
-        bot.send_document(VIP_CHANNEL_ID, doc, caption=caption, parse_mode="HTML")
-    print("Posted .npvs document to VIP channel successfully!")
+    # ارسال فایل سند به تلگرام
+    try:
+        send_telegram_document(VIP_CHANNEL_ID, NPVS_FILE_NAME, caption)
+    except Exception as e:
+        print(f"Failed to send document: {e}")
 
 if __name__ == "__main__":
     main()
